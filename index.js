@@ -75,7 +75,7 @@ async function getOrCreateConversation(contactId, sourceId) {
 
 async function abrirConversacion(conversationId) {
   try {
-    await axios.toggle_status = await axios.post(
+    await axios.post(
       `${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/toggle_status`,
       { status: 'open' },
       { headers: { api_access_token: CHATWOOT_API_TOKEN } }
