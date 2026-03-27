@@ -153,5 +153,31 @@ app.post('/outbound', async (req, res) => {
   }
 });
 
+// Registrar mensaje masivo saliente en Chatwoot
+app.post('/send-chatwoot-message', async (req, res) => {
+  const { phone, name, content } = req.body;
+  if (!phone || !content) return res.status(400).json({ ok: false });
+  try {
+    const cleanPhone = phone.replace('+', '');
+    const contact = await findOrCreateContact(cleanPhone, name || 'Cliente WhatsApp');
+    if (!contact) return res.status(500).json({ ok: false });
+    await linkContactToInbox(contact.id, cleanPhone);
+    const conversationId = await getOrCreateConversation(contact.id, contact.identifier);
+    if (!conversationId) return res.status(500).json({ ok: false });
+    await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`, {
+      content,
+      message_type: 'outgoing',
+      private: false
+    }, {
+      headers: { api_access_token: CHATWOOT_API_TOKEN }
+    });
+    console.log(`✅ Mensaje masivo registrado en Chatwoot: ${phone}`);
+    res.json({ ok: true, messageId: conversationId });
+  } catch (err) {
+    console.error(':x: Error send-chatwoot-message:', err.message);
+    res.status(500).json({ ok: false });
+  }
+});
+
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`🚀 Webhook corriendo en puerto ${PORT}`));
