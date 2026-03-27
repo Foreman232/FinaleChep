@@ -11,6 +11,9 @@ const BASE_URL            = 'https://srv904439.hstgr.cloud/api/v1/accounts';
 const D360_API_URL        = 'https://waba-v2.360dialog.io/messages';
 const D360_API_KEY        = process.env.D360_API_KEY;
 
+// Set para evitar reenvío de mensajes masivos
+const mensajesMasivosEnviados = new Set();
+
 async function findOrCreateContact(phone, name = 'Cliente WhatsApp') {
   const identifier = `+${phone}`;
   const payload = {
@@ -67,6 +70,28 @@ async function getOrCreateConversation(contactId, sourceId) {
   } catch (err) {
     console.error(':x: Error creando conversación:', err.message);
     return null;
+  }
+}
+
+async function abrirConversacion(conversationId) {
+  try {
+    await axios.patch(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations`, {
+      ids: [conversationId],
+      status: 'open'
+    }, {
+      headers: { api_access_token: CHATWOOT_API_TOKEN }
+    });
+  } catch (err) {
+    // Intentar con endpoint individual si el batch falla
+    try {
+      await axios.patch(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/toggle_status`, {
+        status: 'open'
+      }, {
+        headers: { api_access_token: CHATWOOT_API_TOKEN }
+      });
+    } catch (err2) {
+      console.error(':x: Error abriendo conversación:', err2.message);
+    }
   }
 }
 
@@ -135,6 +160,15 @@ app.post('/outbound', async (req, res) => {
   const number = msg.conversation?.meta?.sender?.phone_number?.replace('+', '');
   const content = msg.content;
   if (!number || !content) return res.sendStatus(200);
+
+  // Evitar reenviar mensajes masivos que ya fueron enviados por Streamlit
+  const clave = `${number}:${content}`;
+  if (mensajesMasivosEnviados.has(clave)) {
+    mensajesMasivosEnviados.delete(clave);
+    console.log(`⏭️ Mensaje masivo ignorado en outbound para evitar duplicado: ${number}`);
+    return res.sendStatus(200);
+  }
+
   try {
     await axios.post(D360_API_URL, {
       recipient_type: "individual",
@@ -159,11 +193,19 @@ app.post('/send-chatwoot-message', async (req, res) => {
   if (!phone || !content) return res.status(400).json({ ok: false });
   try {
     const cleanPhone = phone.replace('+', '');
+
+    // Registrar en el set para evitar doble envío desde /outbound
+    const clave = `${cleanPhone}:${content}`;
+    mensajesMasivosEnviados.add(clave);
+    setTimeout(() => mensajesMasivosEnviados.delete(clave), 30000); // limpiar después de 30s
+
     const contact = await findOrCreateContact(cleanPhone, name || 'Cliente WhatsApp');
     if (!contact) return res.status(500).json({ ok: false });
     await linkContactToInbox(contact.id, cleanPhone);
     const conversationId = await getOrCreateConversation(contact.id, contact.identifier);
     if (!conversationId) return res.status(500).json({ ok: false });
+
+    // Registrar mensaje como saliente
     await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`, {
       content,
       message_type: 'outgoing',
@@ -171,6 +213,10 @@ app.post('/send-chatwoot-message', async (req, res) => {
     }, {
       headers: { api_access_token: CHATWOOT_API_TOKEN }
     });
+
+    // Forzar conversación abierta
+    await abrirConversacion(conversationId);
+
     console.log(`✅ Mensaje masivo registrado en Chatwoot: ${phone}`);
     res.json({ ok: true, messageId: conversationId });
   } catch (err) {
