@@ -7,7 +7,7 @@ app.use(bodyParser.json());
 const CHATWOOT_API_TOKEN  = process.env.CHATWOOT_API_TOKEN;
 const CHATWOOT_ACCOUNT_ID = process.env.CHATWOOT_ACCOUNT_ID;
 const CHATWOOT_INBOX_ID   = process.env.CHATWOOT_INBOX_ID;
-const BASE_URL            = 'https://app.chatwoot.com/api/v1/accounts';
+const BASE_URL            = 'https://srv904439.hstgr.cloud/api/v1/accounts';
 const D360_API_URL        = 'https://waba-v2.360dialog.io/messages';
 const D360_API_KEY        = process.env.D360_API_KEY;
 
