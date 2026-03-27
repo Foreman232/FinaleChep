@@ -75,23 +75,14 @@ async function getOrCreateConversation(contactId, sourceId) {
 
 async function abrirConversacion(conversationId) {
   try {
-    await axios.patch(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations`, {
-      ids: [conversationId],
-      status: 'open'
-    }, {
-      headers: { api_access_token: CHATWOOT_API_TOKEN }
-    });
+    await axios.toggle_status = await axios.post(
+      `${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/toggle_status`,
+      { status: 'open' },
+      { headers: { api_access_token: CHATWOOT_API_TOKEN } }
+    );
+    console.log(`✅ Conversación ${conversationId} abierta`);
   } catch (err) {
-    // Intentar con endpoint individual si el batch falla
-    try {
-      await axios.patch(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/toggle_status`, {
-        status: 'open'
-      }, {
-        headers: { api_access_token: CHATWOOT_API_TOKEN }
-      });
-    } catch (err2) {
-      console.error(':x: Error abriendo conversación:', err2.message);
-    }
+    console.error(':x: Error abriendo conversación:', err.message);
   }
 }
 
@@ -165,7 +156,7 @@ app.post('/outbound', async (req, res) => {
   const clave = `${number}:${content}`;
   if (mensajesMasivosEnviados.has(clave)) {
     mensajesMasivosEnviados.delete(clave);
-    console.log(`⏭️ Mensaje masivo ignorado en outbound para evitar duplicado: ${number}`);
+    console.log(`⏭️ Mensaje masivo ignorado en outbound: ${number}`);
     return res.sendStatus(200);
   }
 
@@ -197,7 +188,7 @@ app.post('/send-chatwoot-message', async (req, res) => {
     // Registrar en el set para evitar doble envío desde /outbound
     const clave = `${cleanPhone}:${content}`;
     mensajesMasivosEnviados.add(clave);
-    setTimeout(() => mensajesMasivosEnviados.delete(clave), 30000); // limpiar después de 30s
+    setTimeout(() => mensajesMasivosEnviados.delete(clave), 30000);
 
     const contact = await findOrCreateContact(cleanPhone, name || 'Cliente WhatsApp');
     if (!contact) return res.status(500).json({ ok: false });
@@ -214,7 +205,7 @@ app.post('/send-chatwoot-message', async (req, res) => {
       headers: { api_access_token: CHATWOOT_API_TOKEN }
     });
 
-    // Forzar conversación abierta
+    // Forzar conversación abierta siempre
     await abrirConversacion(conversationId);
 
     console.log(`✅ Mensaje masivo registrado en Chatwoot: ${phone}`);
