@@ -119,7 +119,6 @@ async function downloadAndAttachMedia(conversationId, mediaUrl, mediaId, type) {
   try {
     console.log(`🔍 Descargando media tipo ${type}`);
 
-    // Reemplazar host de Facebook (lookaside.fbsbx.com) por 360dialog
     const parsedUrl = new URL(mediaUrl);
     const downloadUrl = `https://waba-v2.360dialog.io${parsedUrl.pathname}${parsedUrl.search}`;
     console.log(`🔍 URL convertida: ${downloadUrl}`);
@@ -291,10 +290,14 @@ app.post('/webhook', async (req, res) => {
 // Saliente desde Chatwoot
 app.post('/outbound', async (req, res) => {
   const msg = req.body;
+
+  // LOG TEMPORAL para ver el payload completo de outbound con adjuntos
+  console.log('📤 Outbound payload completo:', JSON.stringify(msg, null, 2));
+
   if (!msg?.message_type || msg.message_type !== 'outgoing') return res.sendStatus(200);
   const number  = msg.conversation?.meta?.sender?.phone_number?.replace('+', '');
   const content = msg.content;
-  if (!number || !content) return res.sendStatus(200);
+  if (!number) return res.sendStatus(200);
 
   const clave = `${number}:${content}`;
   if (mensajesMasivosEnviados.has(clave)) {
@@ -304,16 +307,20 @@ app.post('/outbound', async (req, res) => {
   }
 
   try {
-    await axios.post(D360_API_URL, {
-      recipient_type: "individual",
-      to: number,
-      type: "text",
-      messaging_product: "whatsapp",
-      text: { body: content }
-    }, {
-      headers: { 'D360-API-KEY': D360_API_KEY, 'Content-Type': 'application/json' }
-    });
-    console.log(`✅ Enviado a WhatsApp: ${content}`);
+    // Si hay texto, enviarlo
+    if (content) {
+      await axios.post(D360_API_URL, {
+        recipient_type: "individual",
+        to: number,
+        type: "text",
+        messaging_product: "whatsapp",
+        text: { body: content }
+      }, {
+        headers: { 'D360-API-KEY': D360_API_KEY, 'Content-Type': 'application/json' }
+      });
+      console.log(`✅ Texto enviado a WhatsApp: ${content}`);
+    }
+
     res.sendStatus(200);
   } catch (err) {
     console.error('❌ Error enviando a WhatsApp:', err.response?.data || err.message);
