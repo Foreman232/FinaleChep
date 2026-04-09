@@ -117,9 +117,14 @@ async function sendToChatwoot(conversationId, type, content) {
 
 async function downloadAndAttachMedia(conversationId, mediaUrl, mediaId, type) {
   try {
-    console.log(`🔍 Descargando media tipo ${type} desde URL directa`);
+    console.log(`🔍 Descargando media tipo ${type}`);
 
-    const mediaResp = await axios.get(mediaUrl, {
+    // Reemplazar host de Facebook (lookaside.fbsbx.com) por 360dialog
+    const parsedUrl = new URL(mediaUrl);
+    const downloadUrl = `https://waba-v2.360dialog.io${parsedUrl.pathname}${parsedUrl.search}`;
+    console.log(`🔍 URL convertida: ${downloadUrl}`);
+
+    const mediaResp = await axios.get(downloadUrl, {
       headers: { 'D360-API-KEY': D360_API_KEY },
       responseType: 'arraybuffer',
       maxRedirects: 5
