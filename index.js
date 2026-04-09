@@ -59,16 +59,14 @@ async function getOrCreateConversation(contactId, sourceId) {
       headers: { api_access_token: CHATWOOT_API_TOKEN }
     });
 
-    // FIX #2: Buscar conversación abierta o pendiente, no solo la primera
     const conversations = convRes.data.payload;
     const activeConv = conversations.find(c => c.status === 'open' || c.status === 'pending');
     if (activeConv) return activeConv.id;
 
-    // Si todas están resueltas, crear una nueva SIN asignar agente
     const newConv = await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations`, {
       source_id: sourceId,
       inbox_id: CHATWOOT_INBOX_ID,
-      assignee_id: null  // FIX #2: Explícitamente sin asignar
+      assignee_id: null
     }, {
       headers: { api_access_token: CHATWOOT_API_TOKEN }
     });
@@ -92,7 +90,6 @@ async function abrirConversacion(conversationId) {
   }
 }
 
-// FIX #2: Quitar asignación de una conversación
 async function desasignarConversacion(conversationId) {
   try {
     await axios.patch(
@@ -106,7 +103,18 @@ async function desasignarConversacion(conversationId) {
   }
 }
 
-// FIX #1: Manejo correcto de tipos de mensaje en Chatwoot
+async function getMediaUrl(mediaId) {
+  try {
+    const resp = await axios.get(`https://waba-v2.360dialog.io/media/${mediaId}`, {
+      headers: { 'D360-API-KEY': D360_API_KEY }
+    });
+    return resp.data?.url || null;
+  } catch (err) {
+    console.error('❌ Error obteniendo media URL:', err.message);
+    return null;
+  }
+}
+
 async function sendToChatwoot(conversationId, type, content) {
   try {
     let payload;
@@ -118,8 +126,6 @@ async function sendToChatwoot(conversationId, type, content) {
         private: false
       };
     } else if (['image', 'document', 'audio', 'video'].includes(type)) {
-      // Chatwoot no puede descargar URLs autenticadas de 360dialog directamente.
-      // Enviamos el link como texto con un label claro para que el agente pueda verlo.
       const labels = {
         image: '🖼️ Imagen recibida',
         document: '📄 Documento recibido',
@@ -149,22 +155,9 @@ async function sendToChatwoot(conversationId, type, content) {
   }
 }
 
-// FIX #3: Obtener la URL del media desde 360dialog antes de enviarlo a Chatwoot
-async function getMediaUrl(mediaId) {
-  try {
-    const resp = await axios.get(`https://waba-v2.360dialog.io/media/${mediaId}`, {
-      headers: { 'D360-API-KEY': D360_API_KEY }
-    });
-    return resp.data?.url || null;
-  } catch (err) {
-    console.error('❌ Error obteniendo media URL:', err.message);
-    return null;
-  }
-}
-
 // Entrante desde WhatsApp (360dialog)
 app.post('/webhook', async (req, res) => {
-  res.sendStatus(200); // FIX #3: Responder de inmediato para no bloquear 360dialog
+  res.sendStatus(200); // Responder de inmediato para no bloquear 360dialog
 
   try {
     const entry = req.body.entry?.[0];
@@ -174,11 +167,9 @@ app.post('/webhook', async (req, res) => {
     const msg = changes?.messages?.[0];
     if (!phone || !msg || msg.from_me) return;
 
-    // FIX #3: Paralelizar contact + inbox link
     const contact = await findOrCreateContact(phone, name);
     if (!contact) return;
 
-    // Ejecutar en paralelo donde sea posible
     await linkContactToInbox(contact.id, phone);
     const conversationId = await getOrCreateConversation(contact.id, contact.identifier);
     if (!conversationId) return;
@@ -189,7 +180,6 @@ app.post('/webhook', async (req, res) => {
       await sendToChatwoot(conversationId, 'text', msg.text.body);
 
     } else if (type === 'image') {
-      // FIX #1: Intentar obtener URL pública; si no, enviar aviso
       const mediaId = msg.image?.id;
       const mediaUrl = mediaId ? await getMediaUrl(mediaId) : msg.image?.link;
       await sendToChatwoot(conversationId, 'image', mediaUrl || 'URL no disponible');
@@ -214,8 +204,38 @@ app.post('/webhook', async (req, res) => {
       const locStr = `📍 Ubicación recibida:\nhttps://maps.google.com/?q=${loc.latitude},${loc.longitude}`;
       await sendToChatwoot(conversationId, 'text', locStr);
 
+    } else if (type === 'contacts') {
+      const contactos = msg.contacts || [];
+      const textos = contactos.map(c => {
+        const nombre = c.name?.formatted_name || 'Sin nombre';
+        const telefono = c.phones?.[0]?.phone || 'Sin teléfono';
+        return `👤 Contacto compartido:\nNombre: ${nombre}\nTeléfono: ${telefono}`;
+      });
+      await sendToChatwoot(conversationId, 'text', textos.join('\n\n'));
+
+    } else if (type === 'sticker') {
+      await sendToChatwoot(conversationId, 'text', '🎨 Sticker recibido');
+
+    } else if (type === 'reaction') {
+      const emoji = msg.reaction?.emoji || '👍';
+      await sendToChatwoot(conversationId, 'text', `Reacción: ${emoji}`);
+
+    } else if (type === 'button') {
+      await sendToChatwoot(conversationId, 'text', msg.button?.text || '[Botón presionado]');
+
+    } else if (type === 'interactive') {
+      const interactive = msg.interactive;
+      let respuesta = '[Respuesta interactiva]';
+      if (interactive?.button_reply) {
+        respuesta = `Botón: ${interactive.button_reply.title}`;
+      } else if (interactive?.list_reply) {
+        respuesta = `Lista: ${interactive.list_reply.title}`;
+      }
+      await sendToChatwoot(conversationId, 'text', respuesta);
+
     } else {
-      await sendToChatwoot(conversationId, 'text', '[Contenido no soportado]');
+      console.log(`⚠️ Tipo no manejado: ${type}`, JSON.stringify(msg));
+      await sendToChatwoot(conversationId, 'text', `[Mensaje de tipo: ${type}]`);
     }
 
   } catch (err) {
@@ -282,7 +302,6 @@ app.post('/send-chatwoot-message', async (req, res) => {
       headers: { api_access_token: CHATWOOT_API_TOKEN }
     });
 
-    // FIX #2: Abrir conversación Y luego desasignar para que quede sin agente
     await abrirConversacion(conversationId);
     await desasignarConversacion(conversationId);
 
