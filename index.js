@@ -115,27 +115,11 @@ async function sendToChatwoot(conversationId, type, content) {
   }
 }
 
-async function downloadAndAttachMedia(conversationId, mediaId, type) {
+async function downloadAndAttachMedia(conversationId, mediaUrl, mediaId, type) {
   try {
-    // Paso 1: Obtener la URL de Facebook CDN desde 360dialog
-    console.log(`🔍 Obteniendo URL de media: ${mediaId}`);
-    const metaResp = await axios.get(`https://waba-v2.360dialog.io/media/${mediaId}`, {
-      headers: { 'D360-API-KEY': D360_API_KEY }
-    });
+    console.log(`🔍 Descargando media tipo ${type} desde URL directa`);
 
-    console.log('🔍 Respuesta meta:', JSON.stringify(metaResp.data));
-
-    // La URL viene como lookaside.fbsbx.com — hay que reemplazar el host
-    const fbUrl = metaResp.data?.url;
-    if (!fbUrl) throw new Error('No se encontró URL en la respuesta');
-
-    // Paso 2: Reemplazar hostname de Facebook por el de 360dialog
-    const parsedUrl = new URL(fbUrl);
-    const downloadUrl = `https://waba-v2.360dialog.io${parsedUrl.pathname}${parsedUrl.search}`;
-    console.log(`🔍 URL de descarga: ${downloadUrl}`);
-
-    // Paso 3: Descargar el archivo binario
-    const mediaResp = await axios.get(downloadUrl, {
+    const mediaResp = await axios.get(mediaUrl, {
       headers: { 'D360-API-KEY': D360_API_KEY },
       responseType: 'arraybuffer',
       maxRedirects: 5
@@ -157,9 +141,8 @@ async function downloadAndAttachMedia(conversationId, mediaId, type) {
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx'
     };
     const ext = extensions[contentType] || 'bin';
-    const filename = `media_${mediaId}.${ext}`;
+    const filename = `media_${mediaId || Date.now()}.${ext}`;
 
-    // Paso 4: Subir a Chatwoot como adjunto
     const form = new FormData();
     form.append('attachments[]', Buffer.from(mediaResp.data), { filename, contentType });
     form.append('message_type', 'incoming');
@@ -210,41 +193,51 @@ app.post('/webhook', async (req, res) => {
       await sendToChatwoot(conversationId, 'text', msg.text.body);
 
     } else if (type === 'image') {
-      const mediaId = msg.image?.id;
-      if (mediaId) {
-        await downloadAndAttachMedia(conversationId, mediaId, 'image');
+      const mediaUrl = msg.image?.url;
+      const mediaId  = msg.image?.id;
+      console.log('🔍 image url:', mediaUrl, '| id:', mediaId);
+      if (mediaUrl) {
+        await downloadAndAttachMedia(conversationId, mediaUrl, mediaId, 'image');
       } else {
-        await sendToChatwoot(conversationId, 'text', '🖼️ Imagen recibida (sin ID)');
+        await sendToChatwoot(conversationId, 'text', '🖼️ Imagen recibida (sin URL)');
       }
 
     } else if (type === 'document') {
-      const mediaId = msg.document?.id;
-      if (mediaId) {
-        await downloadAndAttachMedia(conversationId, mediaId, 'document');
+      const mediaUrl = msg.document?.url;
+      const mediaId  = msg.document?.id;
+      console.log('🔍 document url:', mediaUrl, '| id:', mediaId);
+      if (mediaUrl) {
+        await downloadAndAttachMedia(conversationId, mediaUrl, mediaId, 'document');
       } else {
-        await sendToChatwoot(conversationId, 'text', '📄 Documento recibido (sin ID)');
+        await sendToChatwoot(conversationId, 'text', '📄 Documento recibido (sin URL)');
       }
 
     } else if (type === 'audio') {
-      const mediaId = msg.audio?.id;
-      if (mediaId) {
-        await downloadAndAttachMedia(conversationId, mediaId, 'audio');
+      const mediaUrl = msg.audio?.url;
+      const mediaId  = msg.audio?.id;
+      console.log('🔍 audio url:', mediaUrl, '| id:', mediaId);
+      if (mediaUrl) {
+        await downloadAndAttachMedia(conversationId, mediaUrl, mediaId, 'audio');
       } else {
-        await sendToChatwoot(conversationId, 'text', '🎤 Audio recibido (sin ID)');
+        await sendToChatwoot(conversationId, 'text', '🎤 Audio recibido (sin URL)');
       }
 
     } else if (type === 'video') {
-      const mediaId = msg.video?.id;
-      if (mediaId) {
-        await downloadAndAttachMedia(conversationId, mediaId, 'video');
+      const mediaUrl = msg.video?.url;
+      const mediaId  = msg.video?.id;
+      console.log('🔍 video url:', mediaUrl, '| id:', mediaId);
+      if (mediaUrl) {
+        await downloadAndAttachMedia(conversationId, mediaUrl, mediaId, 'video');
       } else {
-        await sendToChatwoot(conversationId, 'text', '🎥 Video recibido (sin ID)');
+        await sendToChatwoot(conversationId, 'text', '🎥 Video recibido (sin URL)');
       }
 
     } else if (type === 'sticker') {
-      const mediaId = msg.sticker?.id;
-      if (mediaId) {
-        await downloadAndAttachMedia(conversationId, mediaId, 'sticker');
+      const mediaUrl = msg.sticker?.url;
+      const mediaId  = msg.sticker?.id;
+      console.log('🔍 sticker url:', mediaUrl, '| id:', mediaId);
+      if (mediaUrl) {
+        await downloadAndAttachMedia(conversationId, mediaUrl, mediaId, 'sticker');
       } else {
         await sendToChatwoot(conversationId, 'text', '🎨 Sticker recibido');
       }
@@ -257,8 +250,8 @@ app.post('/webhook', async (req, res) => {
     } else if (type === 'contacts') {
       const contactos = msg.contacts || [];
       const textos = contactos.map(c => {
-        const nombre = c.name?.formatted_name || 'Sin nombre';
-        const telefono = c.phones?.[0]?.phone || 'Sin teléfono';
+        const nombre   = c.name?.formatted_name || 'Sin nombre';
+        const telefono = c.phones?.[0]?.phone   || 'Sin teléfono';
         return `👤 Contacto compartido:\nNombre: ${nombre}\nTeléfono: ${telefono}`;
       });
       await sendToChatwoot(conversationId, 'text', textos.join('\n\n'));
@@ -294,7 +287,7 @@ app.post('/webhook', async (req, res) => {
 app.post('/outbound', async (req, res) => {
   const msg = req.body;
   if (!msg?.message_type || msg.message_type !== 'outgoing') return res.sendStatus(200);
-  const number = msg.conversation?.meta?.sender?.phone_number?.replace('+', '');
+  const number  = msg.conversation?.meta?.sender?.phone_number?.replace('+', '');
   const content = msg.content;
   if (!number || !content) return res.sendStatus(200);
 
