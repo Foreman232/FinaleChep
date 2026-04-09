@@ -115,6 +115,7 @@ async function sendToChatwoot(conversationId, type, content) {
   }
 }
 
+// Descarga media entrante de WhatsApp y la sube a Chatwoot
 async function downloadAndAttachMedia(conversationId, mediaUrl, mediaId, type) {
   try {
     console.log(`🔍 Descargando media tipo ${type}`);
@@ -131,15 +132,9 @@ async function downloadAndAttachMedia(conversationId, mediaUrl, mediaId, type) {
 
     const contentType = mediaResp.headers['content-type'] || 'application/octet-stream';
     const extensions = {
-      'image/jpeg': 'jpg',
-      'image/png': 'png',
-      'image/webp': 'webp',
-      'image/gif': 'gif',
-      'audio/ogg': 'ogg',
-      'audio/mpeg': 'mp3',
-      'video/mp4': 'mp4',
-      'application/pdf': 'pdf',
-      'application/msword': 'doc',
+      'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif',
+      'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'video/mp4': 'mp4',
+      'application/pdf': 'pdf', 'application/msword': 'doc',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
       'application/vnd.ms-excel': 'xls',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx'
@@ -156,12 +151,7 @@ async function downloadAndAttachMedia(conversationId, mediaUrl, mediaId, type) {
     await axios.post(
       `${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`,
       form,
-      {
-        headers: {
-          api_access_token: CHATWOOT_API_TOKEN,
-          ...form.getHeaders()
-        }
-      }
+      { headers: { api_access_token: CHATWOOT_API_TOKEN, ...form.getHeaders() } }
     );
     console.log(`✅ Media subida a Chatwoot: ${filename}`);
   } catch (err) {
@@ -169,6 +159,75 @@ async function downloadAndAttachMedia(conversationId, mediaUrl, mediaId, type) {
     console.error('❌ Error media mensaje:', err.message);
     const labels = { image: '🖼️ Imagen', document: '📄 Documento', audio: '🎤 Audio', video: '🎥 Video', sticker: '🎨 Sticker' };
     await sendToChatwoot(conversationId, 'text', `${labels[type] || '📎 Archivo'} recibido (no se pudo cargar)`);
+  }
+}
+
+// Sube archivo de Chatwoot a 360dialog y devuelve el media_id
+async function uploadMediaTo360(dataUrl, fileType) {
+  try {
+    console.log(`📤 Descargando adjunto de Chatwoot: ${dataUrl}`);
+
+    const fileResp = await axios.get(dataUrl, {
+      responseType: 'arraybuffer',
+      headers: { api_access_token: CHATWOOT_API_TOKEN }
+    });
+
+    const contentType = fileResp.headers['content-type'] || 'application/octet-stream';
+    const extensions = {
+      'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif',
+      'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'video/mp4': 'mp4',
+      'application/pdf': 'pdf', 'application/msword': 'doc',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+      'application/vnd.ms-excel': 'xls',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx'
+    };
+    const ext = extensions[contentType] || 'bin';
+    const filename = `outbound_${Date.now()}.${ext}`;
+
+    const form = new FormData();
+    form.append('file', Buffer.from(fileResp.data), { filename, contentType });
+    form.append('messaging_product', 'whatsapp');
+
+    const uploadResp = await axios.post('https://waba-v2.360dialog.io/media', form, {
+      headers: { 'D360-API-KEY': D360_API_KEY, ...form.getHeaders() }
+    });
+
+    const mediaId = uploadResp.data?.id;
+    console.log(`✅ Media subida a 360dialog, id: ${mediaId}`);
+    return { mediaId, contentType };
+  } catch (err) {
+    console.error('❌ Error subiendo media a 360dialog:', err.response?.data || err.message);
+    return null;
+  }
+}
+
+// Envía media desde 360dialog a WhatsApp
+async function sendMediaToWhatsApp(number, mediaId, contentType, caption = '') {
+  try {
+    // Determinar tipo de mensaje según contentType
+    let msgType = 'document';
+    if (contentType.startsWith('image/')) msgType = 'image';
+    else if (contentType.startsWith('video/')) msgType = 'video';
+    else if (contentType.startsWith('audio/')) msgType = 'audio';
+
+    const mediaPayload = { id: mediaId };
+    if (caption && (msgType === 'image' || msgType === 'video' || msgType === 'document')) {
+      mediaPayload.caption = caption;
+    }
+
+    await axios.post(D360_API_URL, {
+      recipient_type: 'individual',
+      to: number,
+      type: msgType,
+      messaging_product: 'whatsapp',
+      [msgType]: mediaPayload
+    }, {
+      headers: { 'D360-API-KEY': D360_API_KEY, 'Content-Type': 'application/json' }
+    });
+
+    console.log(`✅ Media enviada a WhatsApp (${msgType}): ${number}`);
+  } catch (err) {
+    console.error('❌ Error enviando media a WhatsApp:', err.response?.data || err.message);
   }
 }
 
@@ -209,7 +268,6 @@ app.post('/webhook', async (req, res) => {
     } else if (type === 'document') {
       const mediaUrl = msg.document?.url;
       const mediaId  = msg.document?.id;
-      console.log('🔍 document url:', mediaUrl, '| id:', mediaId);
       if (mediaUrl) {
         await downloadAndAttachMedia(conversationId, mediaUrl, mediaId, 'document');
       } else {
@@ -219,7 +277,6 @@ app.post('/webhook', async (req, res) => {
     } else if (type === 'audio') {
       const mediaUrl = msg.audio?.url;
       const mediaId  = msg.audio?.id;
-      console.log('🔍 audio url:', mediaUrl, '| id:', mediaId);
       if (mediaUrl) {
         await downloadAndAttachMedia(conversationId, mediaUrl, mediaId, 'audio');
       } else {
@@ -229,7 +286,6 @@ app.post('/webhook', async (req, res) => {
     } else if (type === 'video') {
       const mediaUrl = msg.video?.url;
       const mediaId  = msg.video?.id;
-      console.log('🔍 video url:', mediaUrl, '| id:', mediaId);
       if (mediaUrl) {
         await downloadAndAttachMedia(conversationId, mediaUrl, mediaId, 'video');
       } else {
@@ -239,7 +295,6 @@ app.post('/webhook', async (req, res) => {
     } else if (type === 'sticker') {
       const mediaUrl = msg.sticker?.url;
       const mediaId  = msg.sticker?.id;
-      console.log('🔍 sticker url:', mediaUrl, '| id:', mediaId);
       if (mediaUrl) {
         await downloadAndAttachMedia(conversationId, mediaUrl, mediaId, 'sticker');
       } else {
@@ -291,29 +346,29 @@ app.post('/webhook', async (req, res) => {
 app.post('/outbound', async (req, res) => {
   const msg = req.body;
 
-  // LOG TEMPORAL para ver el payload completo de outbound con adjuntos
-  console.log('📤 Outbound payload completo:', JSON.stringify(msg, null, 2));
-
   if (!msg?.message_type || msg.message_type !== 'outgoing') return res.sendStatus(200);
+
   const number  = msg.conversation?.meta?.sender?.phone_number?.replace('+', '');
   const content = msg.content;
+  const attachments = msg.attachments || [];
+
   if (!number) return res.sendStatus(200);
 
   const clave = `${number}:${content}`;
-  if (mensajesMasivosEnviados.has(clave)) {
+  if (content && mensajesMasivosEnviados.has(clave)) {
     mensajesMasivosEnviados.delete(clave);
     console.log(`⏭️ Mensaje masivo ignorado en outbound: ${number}`);
     return res.sendStatus(200);
   }
 
   try {
-    // Si hay texto, enviarlo
+    // Enviar texto si hay contenido
     if (content) {
       await axios.post(D360_API_URL, {
-        recipient_type: "individual",
+        recipient_type: 'individual',
         to: number,
-        type: "text",
-        messaging_product: "whatsapp",
+        type: 'text',
+        messaging_product: 'whatsapp',
         text: { body: content }
       }, {
         headers: { 'D360-API-KEY': D360_API_KEY, 'Content-Type': 'application/json' }
@@ -321,9 +376,22 @@ app.post('/outbound', async (req, res) => {
       console.log(`✅ Texto enviado a WhatsApp: ${content}`);
     }
 
+    // Enviar adjuntos si los hay
+    for (const attachment of attachments) {
+      const dataUrl  = attachment.data_url;
+      const fileType = attachment.file_type;
+      if (!dataUrl) continue;
+
+      console.log(`📎 Procesando adjunto tipo: ${fileType}`);
+      const uploaded = await uploadMediaTo360(dataUrl, fileType);
+      if (uploaded) {
+        await sendMediaToWhatsApp(number, uploaded.mediaId, uploaded.contentType, content || '');
+      }
+    }
+
     res.sendStatus(200);
   } catch (err) {
-    console.error('❌ Error enviando a WhatsApp:', err.response?.data || err.message);
+    console.error('❌ Error en outbound:', err.response?.data || err.message);
     res.sendStatus(500);
   }
 });
