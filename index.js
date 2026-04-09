@@ -202,16 +202,23 @@ async function uploadMediaTo360(dataUrl, fileType) {
 }
 
 // Envía media desde 360dialog a WhatsApp
-async function sendMediaToWhatsApp(number, mediaId, contentType, caption = '') {
+async function sendMediaToWhatsApp(number, mediaId, contentType, fileType, caption = '') {
   try {
-    // Determinar tipo de mensaje según contentType
+    // Determinar tipo de mensaje
     let msgType = 'document';
-    if (contentType.startsWith('image/')) msgType = 'image';
-    else if (contentType.startsWith('video/')) msgType = 'video';
-    else if (contentType.startsWith('audio/')) msgType = 'audio';
+    if (fileType === 'sticker' || contentType === 'image/webp') {
+      msgType = 'sticker';
+    } else if (contentType.startsWith('image/')) {
+      msgType = 'image';
+    } else if (contentType.startsWith('video/')) {
+      msgType = 'video';
+    } else if (contentType.startsWith('audio/')) {
+      msgType = 'audio';
+    }
 
     const mediaPayload = { id: mediaId };
-    if (caption && (msgType === 'image' || msgType === 'video' || msgType === 'document')) {
+    // Los stickers no soportan caption
+    if (caption && msgType !== 'sticker') {
       mediaPayload.caption = caption;
     }
 
@@ -348,8 +355,8 @@ app.post('/outbound', async (req, res) => {
 
   if (!msg?.message_type || msg.message_type !== 'outgoing') return res.sendStatus(200);
 
-  const number  = msg.conversation?.meta?.sender?.phone_number?.replace('+', '');
-  const content = msg.content;
+  const number      = msg.conversation?.meta?.sender?.phone_number?.replace('+', '');
+  const content     = msg.content;
   const attachments = msg.attachments || [];
 
   if (!number) return res.sendStatus(200);
@@ -385,7 +392,7 @@ app.post('/outbound', async (req, res) => {
       console.log(`📎 Procesando adjunto tipo: ${fileType}`);
       const uploaded = await uploadMediaTo360(dataUrl, fileType);
       if (uploaded) {
-        await sendMediaToWhatsApp(number, uploaded.mediaId, uploaded.contentType, content || '');
+        await sendMediaToWhatsApp(number, uploaded.mediaId, uploaded.contentType, fileType, content || '');
       }
     }
 
