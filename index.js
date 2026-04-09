@@ -117,23 +117,28 @@ async function sendToChatwoot(conversationId, type, content) {
 
 async function downloadAndAttachMedia(conversationId, mediaId, type) {
   try {
-    // Paso 1: Obtener la URL temporal del media
-    const urlResp = await axios.get(`https://waba-v2.360dialog.io/v1/media/${mediaId}`, {
+    // Paso 1: Obtener la URL de Facebook CDN desde 360dialog
+    console.log(`🔍 Obteniendo URL de media: ${mediaId}`);
+    const metaResp = await axios.get(`https://waba-v2.360dialog.io/media/${mediaId}`, {
       headers: { 'D360-API-KEY': D360_API_KEY }
     });
 
-    console.log('🔍 Respuesta de media endpoint:', JSON.stringify(urlResp.data));
+    console.log('🔍 Respuesta meta:', JSON.stringify(metaResp.data));
 
-    const mediaUrl = urlResp.data?.url || urlResp.data?.link || urlResp.data?.media_url;
-    if (!mediaUrl) {
-      console.error('❌ No se encontró URL en respuesta:', JSON.stringify(urlResp.data));
-      throw new Error('URL de media no encontrada');
-    }
+    // La URL viene como lookaside.fbsbx.com — hay que reemplazar el host
+    const fbUrl = metaResp.data?.url;
+    if (!fbUrl) throw new Error('No se encontró URL en la respuesta');
 
-    // Paso 2: Descargar el archivo desde esa URL
-    const mediaResp = await axios.get(mediaUrl, {
+    // Paso 2: Reemplazar hostname de Facebook por el de 360dialog
+    const parsedUrl = new URL(fbUrl);
+    const downloadUrl = `https://waba-v2.360dialog.io${parsedUrl.pathname}${parsedUrl.search}`;
+    console.log(`🔍 URL de descarga: ${downloadUrl}`);
+
+    // Paso 3: Descargar el archivo binario
+    const mediaResp = await axios.get(downloadUrl, {
       headers: { 'D360-API-KEY': D360_API_KEY },
-      responseType: 'arraybuffer'
+      responseType: 'arraybuffer',
+      maxRedirects: 5
     });
 
     const contentType = mediaResp.headers['content-type'] || 'application/octet-stream';
@@ -154,6 +159,7 @@ async function downloadAndAttachMedia(conversationId, mediaId, type) {
     const ext = extensions[contentType] || 'bin';
     const filename = `media_${mediaId}.${ext}`;
 
+    // Paso 4: Subir a Chatwoot como adjunto
     const form = new FormData();
     form.append('attachments[]', Buffer.from(mediaResp.data), { filename, contentType });
     form.append('message_type', 'incoming');
@@ -172,7 +178,8 @@ async function downloadAndAttachMedia(conversationId, mediaId, type) {
     );
     console.log(`✅ Media subida a Chatwoot: ${filename}`);
   } catch (err) {
-    console.error('❌ Error descargando/subiendo media:', err.response?.status, err.message);
+    console.error('❌ Error media status:', err.response?.status);
+    console.error('❌ Error media mensaje:', err.message);
     const labels = { image: '🖼️ Imagen', document: '📄 Documento', audio: '🎤 Audio', video: '🎥 Video', sticker: '🎨 Sticker' };
     await sendToChatwoot(conversationId, 'text', `${labels[type] || '📎 Archivo'} recibido (no se pudo cargar)`);
   }
