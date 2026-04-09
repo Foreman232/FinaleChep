@@ -105,15 +105,9 @@ async function desasignarConversacion(conversationId) {
 
 async function sendToChatwoot(conversationId, type, content) {
   try {
-    let payload;
-    if (type === 'text') {
-      payload = { content, message_type: 'incoming', private: false };
-    } else {
-      payload = { content, message_type: 'incoming', private: false };
-    }
     await axios.post(
       `${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`,
-      payload,
+      { content, message_type: 'incoming', private: false },
       { headers: { api_access_token: CHATWOOT_API_TOKEN } }
     );
   } catch (err) {
@@ -123,7 +117,21 @@ async function sendToChatwoot(conversationId, type, content) {
 
 async function downloadAndAttachMedia(conversationId, mediaId, type) {
   try {
-    const mediaResp = await axios.get(`https://waba-v2.360dialog.io/media/${mediaId}`, {
+    // Paso 1: Obtener la URL temporal del media
+    const urlResp = await axios.get(`https://waba-v2.360dialog.io/v1/media/${mediaId}`, {
+      headers: { 'D360-API-KEY': D360_API_KEY }
+    });
+
+    console.log('🔍 Respuesta de media endpoint:', JSON.stringify(urlResp.data));
+
+    const mediaUrl = urlResp.data?.url || urlResp.data?.link || urlResp.data?.media_url;
+    if (!mediaUrl) {
+      console.error('❌ No se encontró URL en respuesta:', JSON.stringify(urlResp.data));
+      throw new Error('URL de media no encontrada');
+    }
+
+    // Paso 2: Descargar el archivo desde esa URL
+    const mediaResp = await axios.get(mediaUrl, {
       headers: { 'D360-API-KEY': D360_API_KEY },
       responseType: 'arraybuffer'
     });
@@ -133,6 +141,7 @@ async function downloadAndAttachMedia(conversationId, mediaId, type) {
       'image/jpeg': 'jpg',
       'image/png': 'png',
       'image/webp': 'webp',
+      'image/gif': 'gif',
       'audio/ogg': 'ogg',
       'audio/mpeg': 'mp3',
       'video/mp4': 'mp4',
@@ -163,15 +172,15 @@ async function downloadAndAttachMedia(conversationId, mediaId, type) {
     );
     console.log(`✅ Media subida a Chatwoot: ${filename}`);
   } catch (err) {
-    console.error('❌ Error descargando/subiendo media:', err.message);
-    const labels = { image: '🖼️ Imagen', document: '📄 Documento', audio: '🎤 Audio', video: '🎥 Video' };
+    console.error('❌ Error descargando/subiendo media:', err.response?.status, err.message);
+    const labels = { image: '🖼️ Imagen', document: '📄 Documento', audio: '🎤 Audio', video: '🎥 Video', sticker: '🎨 Sticker' };
     await sendToChatwoot(conversationId, 'text', `${labels[type] || '📎 Archivo'} recibido (no se pudo cargar)`);
   }
 }
 
 // Entrante desde WhatsApp (360dialog)
 app.post('/webhook', async (req, res) => {
-  res.sendStatus(200); // Responder inmediato para no bloquear 360dialog
+  res.sendStatus(200);
 
   try {
     const entry = req.body.entry?.[0];
@@ -225,6 +234,14 @@ app.post('/webhook', async (req, res) => {
         await sendToChatwoot(conversationId, 'text', '🎥 Video recibido (sin ID)');
       }
 
+    } else if (type === 'sticker') {
+      const mediaId = msg.sticker?.id;
+      if (mediaId) {
+        await downloadAndAttachMedia(conversationId, mediaId, 'sticker');
+      } else {
+        await sendToChatwoot(conversationId, 'text', '🎨 Sticker recibido');
+      }
+
     } else if (type === 'location') {
       const loc = msg.location;
       const locStr = `📍 Ubicación recibida:\nhttps://maps.google.com/?q=${loc.latitude},${loc.longitude}`;
@@ -238,9 +255,6 @@ app.post('/webhook', async (req, res) => {
         return `👤 Contacto compartido:\nNombre: ${nombre}\nTeléfono: ${telefono}`;
       });
       await sendToChatwoot(conversationId, 'text', textos.join('\n\n'));
-
-    } else if (type === 'sticker') {
-      await sendToChatwoot(conversationId, 'text', '🎨 Sticker recibido');
 
     } else if (type === 'reaction') {
       const emoji = msg.reaction?.emoji || '👍';
