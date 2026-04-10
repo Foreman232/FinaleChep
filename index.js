@@ -60,9 +60,25 @@ async function getOrCreateConversation(contactId, sourceId) {
       headers: { api_access_token: CHATWOOT_API_TOKEN }
     });
     const conversations = convRes.data.payload;
-    const activeConv = conversations.find(c => c.status === 'open' || c.status === 'pending');
-    if (activeConv) return activeConv.id;
 
+    if (conversations.length > 0) {
+      // Tomar la conversación más reciente sin importar su estado
+      const conv = conversations[0];
+
+      // Si está resuelta, reabrirla en vez de crear una nueva
+      if (conv.status === 'resolved') {
+        await axios.post(
+          `${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conv.id}/toggle_status`,
+          { status: 'open' },
+          { headers: { api_access_token: CHATWOOT_API_TOKEN } }
+        );
+        console.log(`✅ Conversación ${conv.id} reactivada desde resuelta`);
+      }
+
+      return conv.id;
+    }
+
+    // Solo crear nueva si no existe ninguna
     const newConv = await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations`, {
       source_id: sourceId,
       inbox_id: CHATWOOT_INBOX_ID,
@@ -70,6 +86,7 @@ async function getOrCreateConversation(contactId, sourceId) {
     }, {
       headers: { api_access_token: CHATWOOT_API_TOKEN }
     });
+    console.log(`✅ Nueva conversación creada: ${newConv.data.id}`);
     return newConv.data.id;
   } catch (err) {
     console.error('❌ Error creando conversación:', err.message);
@@ -115,7 +132,6 @@ async function sendToChatwoot(conversationId, type, content) {
   }
 }
 
-// Descarga media entrante de WhatsApp y la sube a Chatwoot
 async function downloadAndAttachMedia(conversationId, mediaUrl, mediaId, type) {
   try {
     console.log(`🔍 Descargando media tipo ${type}`);
@@ -162,7 +178,6 @@ async function downloadAndAttachMedia(conversationId, mediaUrl, mediaId, type) {
   }
 }
 
-// Sube archivo de Chatwoot a 360dialog y devuelve el media_id
 async function uploadMediaTo360(dataUrl, fileType) {
   try {
     console.log(`📤 Descargando adjunto de Chatwoot: ${dataUrl}`);
@@ -201,10 +216,8 @@ async function uploadMediaTo360(dataUrl, fileType) {
   }
 }
 
-// Envía media desde 360dialog a WhatsApp
 async function sendMediaToWhatsApp(number, mediaId, contentType, fileType, caption = '') {
   try {
-    // Determinar tipo de mensaje
     let msgType = 'document';
     if (fileType === 'sticker' || contentType === 'image/webp') {
       msgType = 'sticker';
@@ -217,7 +230,6 @@ async function sendMediaToWhatsApp(number, mediaId, contentType, fileType, capti
     }
 
     const mediaPayload = { id: mediaId };
-    // Los stickers no soportan caption
     if (caption && msgType !== 'sticker') {
       mediaPayload.caption = caption;
     }
@@ -265,7 +277,6 @@ app.post('/webhook', async (req, res) => {
     } else if (type === 'image') {
       const mediaUrl = msg.image?.url;
       const mediaId  = msg.image?.id;
-      console.log('🔍 image url:', mediaUrl, '| id:', mediaId);
       if (mediaUrl) {
         await downloadAndAttachMedia(conversationId, mediaUrl, mediaId, 'image');
       } else {
@@ -369,7 +380,6 @@ app.post('/outbound', async (req, res) => {
   }
 
   try {
-    // Enviar texto si hay contenido
     if (content) {
       await axios.post(D360_API_URL, {
         recipient_type: 'individual',
@@ -383,7 +393,6 @@ app.post('/outbound', async (req, res) => {
       console.log(`✅ Texto enviado a WhatsApp: ${content}`);
     }
 
-    // Enviar adjuntos si los hay
     for (const attachment of attachments) {
       const dataUrl  = attachment.data_url;
       const fileType = attachment.file_type;
