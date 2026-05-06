@@ -27,8 +27,11 @@ async function getAllContacts() {
 async function mergeContacts(baseId, childId) {
   try {
     await axios.post(
-      `${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${baseId}/merge`,
-      { child_id: childId },
+      `${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/merge`,
+      {
+        base_contact_id: baseId,
+        child_contact_id: childId
+      },
       { headers: { api_access_token: CHATWOOT_API_TOKEN } }
     );
     console.log(`✅ Fusionados: base=${baseId} <- child=${childId}`);
